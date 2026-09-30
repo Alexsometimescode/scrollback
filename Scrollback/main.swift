@@ -455,6 +455,16 @@ struct Run: Identifiable {
 /// Saved stand-in counts for days the digest left at zero. Today is never replaced.
 /// File lives under ~/.beatbar so a relaunch shows the same bars.
 enum DemoHistory {
+    static let preview = CommandLine.arguments.contains("--demo")
+
+    static func screenshotDays() -> [Day] {
+        let counts = [9, 15, 12, 12, 15, 10, 11]
+        return counts.enumerated().map { index, count in
+            let date = Calendar.current.date(byAdding: .day, value: index - 6, to: Date())!
+            return Day(id: "demo-\(index)", date: date, collected: count)
+        }
+    }
+
     private static var path: String { NSHomeDirectory() + "/.beatbar/demo-history.json" }
     private static let samples = [6, 4, 8, 5, 3, 7, 9]
 
@@ -538,6 +548,7 @@ struct Day: Identifiable {
     /// Real digest counts win. Past days still at zero pick up the saved demo
     /// series so the chart is not a single bar. Today is left as collected.
     static func loadForPanel() -> [Day] {
+        if DemoHistory.preview { return DemoHistory.screenshotDays() }
         let fromDigest = load()
         if fromDigest.isEmpty { return seedDemo() }
         return DemoHistory.fillDays(fromDigest)
@@ -840,7 +851,6 @@ struct Panel: View {
     @State private var showAudit = ProcessInfo.processInfo.environment["BEATBAR_SHOT"] == "runs"
     @State private var atLogin = FileManager.default.fileExists(atPath: loginAgent)
     @State private var showSources = ProcessInfo.processInfo.environment["BEATBAR_SHOT"] == "sources"
-    @State private var showAdvanced = ProcessInfo.processInfo.environment["BEATBAR_SHOT"] == "sources"
     @State private var showCollectAgents = false
     @State private var showWriteUps = ProcessInfo.processInfo.environment["BEATBAR_SHOT"] == "settings"
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -967,7 +977,7 @@ struct Panel: View {
                 VStack(spacing: 6) {
                     panelSecondaryButton("Today's file") { openTodayFile() }
                     panelSecondaryButton("This week folder") { openWeekFolder() }
-                    panelSecondaryButton("Collect chats…") {
+                    panelSecondaryButton("Collect chats") {
                         dismissScrollbackMenuPanel?()
                         CollectionWindows.showDates()
                     }
@@ -984,7 +994,7 @@ struct Panel: View {
         let total = store.days.reduce(0) { $0 + $1.collected }
         return VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text("Chats collected").font(.caption).foregroundStyle(.secondary)
+                Text(DemoHistory.preview ? "Demo chats" : "Chats collected").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Text("\(total) in 7 days").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
@@ -1078,7 +1088,7 @@ struct Panel: View {
                 switchRow("Redact locally", "HIDE_SENSITIVE", compact: true,
                           help: "Redacts private info on your Mac before summarizing, using Desert Ant Redact offline (~12 MB Core ML, no cloud).")
                 switchRow("Automatic collection", "daily_enabled", compact: true)
-                scheduleControls
+                if store.conf["daily_enabled"] == "true" { scheduleControls }
                 HStack {
                     Text("Open at login").font(.callout)
                     Spacer()
@@ -1090,12 +1100,7 @@ struct Panel: View {
             }
 
             VStack(alignment: .leading, spacing: 0) {
-            SettingsAccordion(title: "Advanced", expanded: $showAdvanced) {
-                VStack(alignment: .leading, spacing: 8) {
-                    switchRow("Warn me when a run fails", "notify_on_failure")
-                }
-                .padding(.top, 2)
-            }
+            switchRow("Warn me when a run fails", "notify_on_failure", compact: true)
 
             SettingsAccordion(title: "Collect agents", expanded: $showCollectAgents) {
                 VStack(alignment: .leading, spacing: 8) {
@@ -1104,11 +1109,9 @@ struct Panel: View {
                     HStack {
                         Text("Summarizer").font(.callout)
                         Spacer()
-                        Picker("", selection: summarizerBinding) {
-                            Text("Cursor").tag("cursor")
-                            Text("Grok").tag("grok")
-                        }
-                        .labelsHidden().pickerStyle(.menu).frame(width: 120)
+                        TextField("Agent default model", text: summarizerBinding)
+                            .textFieldStyle(.roundedBorder).frame(width: 145)
+                            .help("Model ID supported by the active summarizer. Leave empty for its default.")
                     }
                     .frame(minHeight: 44)
                     .contentShape(Rectangle())
@@ -1147,12 +1150,7 @@ struct Panel: View {
 
     private var summarizerBinding: Binding<String> {
         Binding(
-            get: {
-                let m = (store.conf["SUMMARY_MODEL"] ?? "").lowercased()
-                if m.contains("grok") { return "grok" }
-                if m.contains("composer") { return "composer" }
-                return m.isEmpty ? "cursor" : m
-            },
+            get: { store.conf["SUMMARY_MODEL"] ?? "" },
             set: { store.conf["SUMMARY_MODEL"] = $0; apply() })
     }
 
@@ -1517,7 +1515,7 @@ struct ChatsView: View {
             }
             .padding(14)
             Divider()
-            ScrollView {
+            ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(store.chats) { c in
                         HStack(spacing: 10) {
@@ -1614,7 +1612,7 @@ enum HistoryWindow {
         view.textContainerInset = NSSize(width: 14, height: 14)
 
         let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 340))
-        scroll.hasVerticalScroller = true
+        scroll.hasVerticalScroller = false
         scroll.documentView = view
 
         if window == nil {

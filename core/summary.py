@@ -27,10 +27,9 @@ def resolve_cli(conf):
 
 def synthesizer_label(conf):
     model = conf.get('SUMMARY_MODEL') if isinstance(conf, dict) else conf['SUMMARY_MODEL']
-    if model:
-        return model
     _, label = resolve_cli(conf)
-    return label or 'local draft only'
+    return '%s / %s' % (label, model) if model else label
+
 
 
 def _skill_text(conf):
@@ -98,13 +97,35 @@ def draft(context, start, end, conf):
     prompt = 'Selected period: %s to %s (inclusive).\nTranscript evidence follows:\n%s' % (start, end, context)
     system = _system_prompt(skill_text)
     name = Path(cli).name
+    if name == 'codex':
+        with TemporaryDirectory(prefix='scrollback-summary-') as directory:
+            schema = Path(directory) / 'schema.json'
+            output = Path(directory) / 'summary.json'
+            schema.write_text(json.dumps(SCHEMA))
+            args = [cli, 'exec', '--ignore-user-config', '--ephemeral', '--skip-git-repo-check',
+                    '--sandbox', 'read-only', '--output-schema', str(schema),
+                    '--output-last-message', str(output), '-']
+            model = (conf.get('SUMMARY_MODEL') or '').strip()
+            if model:
+                args[2:2] = ['--model', model]
+            try:
+                result = subprocess.run(args, input=system + '\n\n' + prompt, text=True,
+                                        capture_output=True, cwd=directory, timeout=180)
+                if result.returncode or not output.is_file():
+                    raise ValueError('Codex could not summarize. Check Codex sign-in and retry.')
+                return _coerce_overview(json.loads(output.read_text()))
+            except subprocess.TimeoutExpired:
+                raise ValueError('Codex summary timed out. Try a smaller date range.') from None
     if name == 'agent':
-        args = [cli, '-p', '--output-format', 'json', system + '\n\n' + prompt]
+        args = [cli, '-p', '--mode', 'ask', '--output-format', 'json', system + '\n\n' + prompt]
     else:
         args = [cli, '-p', '--safe-mode', '--tools', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',
                 '--setting-sources', '', '--no-session-persistence', '--permission-mode', 'dontAsk',
                 '--output-format', 'json', '--json-schema', json.dumps(SCHEMA), '--max-budget-usd', '2',
                 '--system-prompt', system]
+    model = (conf.get("SUMMARY_MODEL") or "").strip()
+    if model:
+        args[1:1] = ["--model", model]
     env = dict(os.environ)
     env.pop('CLAUDECODE', None)
     with TemporaryDirectory(prefix='scrollback-overview-') as directory:

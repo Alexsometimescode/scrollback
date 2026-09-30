@@ -41,7 +41,7 @@ private struct MarkdownSectionsPreview: View {
     }
 
     var body: some View {
-        ScrollView {
+        ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 18) {
                 ForEach(sections) { section in
                     VStack(alignment: .leading, spacing: 8) {
@@ -76,7 +76,7 @@ private struct PlainNoteViewer: NSViewRepresentable {
     let text: String
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView()
-        scroll.hasVerticalScroller = true
+        scroll.hasVerticalScroller = false
         scroll.drawsBackground = false
         let view = NSTextView()
         view.isEditable = false
@@ -122,19 +122,25 @@ struct CollectionChat: Decodable, Identifiable {
     }
 
     var activityLabel: String {
-        func readable(_ value: String) -> String {
+        func parse(_ value: String) -> Date? {
             let parser = ISO8601DateFormatter()
             parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            var date = parser.date(from: value)
-            if date == nil {
-                parser.formatOptions = [.withInternetDateTime]
-                date = parser.date(from: value)
-            }
-            return date?.formatted(date: .abbreviated, time: .shortened) ?? value
+            if let date = parser.date(from: value) { return date }
+            parser.formatOptions = [.withInternetDateTime]
+            return parser.date(from: value)
         }
-        let start = readable(first), end = readable(last)
-        return start == end ? start : "\(start) to \(end)"
+        guard let start = parse(first), let end = parse(last) else { return first }
+        let day = DateFormatter()
+        day.dateFormat = Calendar.current.component(.year, from: start) == Calendar.current.component(.year, from: end) ? "d MMM" : "d MMM yyyy"
+        let clock = DateFormatter()
+        clock.dateFormat = "HH:mm"
+        let startTime = clock.string(from: start), endTime = clock.string(from: end)
+        if Calendar.current.isDate(start, inSameDayAs: end) {
+            return "\(day.string(from: start)) · \(startTime)" + (startTime == endTime ? "" : "-\(endTime)")
+        }
+        return "\(day.string(from: start)) · \(startTime) - \(day.string(from: end)) · \(endTime)"
     }
+
 }
 
 private struct CollectionReply: Decodable {
@@ -740,7 +746,7 @@ struct CollectionChatsView: View {
                     ForEach(model.chats.sorted { $0.last > $1.last }) { chat in
                         chatRow(chat)
                     }
-                }.disabled(model.busy)
+                }.scrollIndicators(.hidden).disabled(model.busy)
             }
             Divider()
             VStack(alignment: .leading, spacing: 12) {
@@ -838,7 +844,7 @@ private struct CollectionDraftView: View {
                     Button("Save new…") { model.saveDraft(append: false) }
                         .buttonStyle(.borderedProminent)
                         .disabled(model.activeDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }.disabled(model.busy)
+                }.scrollIndicators(.hidden).disabled(model.busy)
             }.padding(20)
         }
     }

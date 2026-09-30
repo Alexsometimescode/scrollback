@@ -164,6 +164,9 @@ class Conf:
         for d in (self.logdir, self.hist.parent):
             d.mkdir(parents=True, exist_ok=True)
 
+    def get(self, key, default=None):
+        return self.v.get(key, default)
+
     def __getitem__(self, k):
         return self.v.get(k, "")
 

@@ -37,6 +37,10 @@ def check():
         (root/'session_index.jsonl').write_text(json.dumps(dict(id='one',thread_name='App chat name'))+'\n')
         (root/'.codex-global-state.json').write_text(json.dumps({'projectless-thread-ids':['one']}))
         rows = sessions(conf,today)
+        assert {r['sid'] for r in rows}=={'codex:one','codex:two'}
+        assert next(r for r in rows if r['sid']=='codex:one')['project']=='project'
+        assert next(r for r in rows if r['sid']=='codex:two')['project']=='Codex'
+        rows=[r for r in rows if r['sid']=='codex:one']
         assert len(rows)==1 and rows[0]['sid']=='codex:one'
         assert rows[0]['users']==['Actual prompt'] and rows[0]['answers']==['Answer']
         assert rows[0]['project']=='project' and len(rows[0]['stamps'])==1
@@ -61,9 +65,9 @@ def check():
         assert [r for r in sessions(conf,today) if r['sid']=='codex:desktop'][0]['users']==['Desktop prompt']
         child=Path(conf['CODEX_SESSIONS'])/'nested.jsonl'
         child.write_text(json.dumps(dict(type='session_meta',payload=dict(id='child',parent_thread_id='desktop')))+'\n'+desktop.read_text())
-        assert len(sessions(conf,today))==2
+        assert len(sessions(conf,today))==3
         os.utime(desktop,(1,1))
-        assert len(sessions(conf,today))==1
+        assert len(sessions(conf,today))==2
         try:
             read_cursor(root/'missing.txt')
         except FileNotFoundError:

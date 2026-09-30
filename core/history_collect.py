@@ -11,7 +11,7 @@ from pathlib import Path
 import scroll
 
 AGENTS = {'claude', 'codex', 'cursor', 'grok'}
-_BROWSER = re.compile(r'<in-app-browser-context>[\s\S]*?</in-app-browser-context>', re.I)
+_BROWSER = re.compile(r'<in-app-browser-context\b[^>]*>[\s\S]*?</in-app-browser-context>', re.I)
 _USER_QUERY = re.compile(r'<user_query>([\s\S]*?)</user_query>', re.I)
 
 
@@ -225,6 +225,19 @@ def render(rows, start, end):
     return scroll.redact('\n'.join(lines))
 
 
+def summary_context(rows, start, end):
+    """Bound preview evidence per chat while preserving every selected chat."""
+    budget = max(500, 200000 // max(1, len(rows)))
+    parts = []
+    for row in rows:
+        text = render([row], start, end)
+        if len(text) > budget:
+            half = (budget - 100) // 2
+            text = text[:half] + '\n[Evidence shortened: middle omitted. Do not infer missing outcomes.]\n' + text[-half:]
+        parts.append(text)
+    return '\n\n'.join(parts)
+
+
 def execute(value, conf):
     start, end, agents, selected = request(value)
     if value['operation'] == 'preview' and not selected:
@@ -249,7 +262,7 @@ def execute(value, conf):
                 fallback['synthesizer'] = label
                 return dict(chats=[metadata(row) for row in rows], **fallback)
             try:
-                overview = draft(context, start, end, conf)
+                overview = draft(summary_context(rows, start, end), start, end, conf)
                 overview['synthesizer'] = label
                 overview.setdefault('notice', 'Overview from %s.' % label)
                 return dict(chats=[metadata(row) for row in rows], handoff=fallback['handoff'], **overview)

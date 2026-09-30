@@ -22,6 +22,10 @@ with TemporaryDirectory() as tmp:
         return SimpleNamespace(returncode=0,stdout=json.dumps(dict(structured_output=response)))
     with patch('summary.subprocess.run', side_effect=provider):
         assert draft('Evidence','2026-01-01','2026-01-03',conf)==response
+    with patch('summary.subprocess.run', side_effect=provider) as run:
+        assert draft('Evidence','2026-01-01','2026-01-03',dict(conf, SUMMARY_MODEL='test-model')) == response
+        args = run.call_args.args[0]
+        assert args[args.index('--model') + 1] == 'test-model'
     for bad in ['not JSON',json.dumps({'structured_output': {'summary': '', 'categories': 'x'}}),json.dumps({'is_error':True})]:
         with patch('summary.subprocess.run', return_value=SimpleNamespace(returncode=0,stdout=bad)):
             try: draft('Evidence','2026-01-01','2026-01-03',conf)
@@ -67,3 +71,17 @@ with TemporaryDirectory() as tmp:
         assert history_collect.execute(query,conf)['handoff']
         provider.assert_not_called()
 print('Unavailable provider, local-only handoff, unassigned project, and empty selection checks passed')
+
+# Real configuration protocol and browser-context attributes must work.
+import scroll
+conf = object.__new__(scroll.Conf)
+conf.v = {'SUMMARY_SKILL': ''}
+assert conf.get('SUMMARY_SKILL') == ''
+assert conf.get('missing', 'default') == 'default'
+assert history_collect._clean_message('<in-app-browser-context source="ambient">hidden</in-app-browser-context>Build a ledger') == 'Build a ledger'
+print('Configuration and clean chat descriptions passed')
+
+with patch('history_collect.render', return_value='x' * 100000):
+    bounded = history_collect.summary_context([{}] * 35, '2026-09-16', '2026-09-30')
+    assert len(bounded) < 210000 and bounded.count('Evidence shortened') == 35
+print('Large selection evidence budget passed')

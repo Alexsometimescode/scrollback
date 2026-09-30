@@ -242,6 +242,10 @@ def codex_sessions(conf, day, *, require_user=True, outside_workdir=False):
         if not has_human or (require_user and not users) or not activity or sid in seen:
             continue
         seen.add(sid)
+        # Outside the configured work folder the path label is not a project
+        # the Sources list can group on. One row, named Codex, is the source.
+        if project_display:
+            project = "Codex"
         display = info.get("project") or project_display
         result.append(dict(sid=sid, project=project,
                            project_display=display,
@@ -254,7 +258,10 @@ def codex_sessions(conf, day, *, require_user=True, outside_workdir=False):
 
 
 def sessions(conf, day, *, require_user=True):
-    result = codex_sessions(conf, day, require_user=require_user)
+    # Codex keeps chats whose cwd is outside WORKDIR (the app's own project
+    # folders). Those are still this user's Codex chats; dropping them made
+    # the source list show Cursor only.
+    result = codex_sessions(conf, day, require_user=require_user, outside_workdir=True)
     try:
         from .cursor_source import sessions as cursor_sessions
     except ImportError:
