@@ -1,0 +1,12 @@
+Scrollback/Scrollback.app/
+Scrollback.app.zip
+paths.conf
+*.log
+.DS_Store
+AUDIT-*.md
+TASKS.md
+
+__pycache__/
+*.pyc
+.Python
+.pytest_cache/
