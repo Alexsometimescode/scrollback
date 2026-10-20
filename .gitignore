@@ -10,3 +10,13 @@ __pycache__/
 *.pyc
 .Python
 .pytest_cache/
+
+# Private local development notes and retired captures stay on disk only.
+/internal/
+/CODEX_ARCHIVE.md
+/docs/panel.png
+/docs/chats.png
+/docs/sources.png
+/docs/settings.png
+/docs/runs.png
+/docs/update.png

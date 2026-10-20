@@ -1,12 +1,22 @@
 #!/usr/bin/env zsh
-# Opens a terminal in this week's folder and runs REPORT_COMMAND there.
-#
-# Always external and always interactive: writing the report is a conversation,
-# not a batch job, so a headless mode that produced a file nobody watched was
-# the wrong shape. Available any day; refusing before Friday was a rule with no
-# reason behind it.
+# Generate a weekly write-up with the selected provider.
+# Explicit legacy mode retains the older interactive command path.
 set -uo pipefail
 source "${0:A:h}/paths.sh"
+
+if [[ "${WRITEUPS_ENABLED:-false}" != legacy ]]; then
+  if [[ "${WRITEUPS_ENABLED:-false}" != true ]]; then
+    print -r -- "Done|Write-ups disabled||" > "$PROG"
+    exit 0
+  fi
+  print -r -- "Writing weekly summary|using selected summarizer||" > "$PROG"
+  if python3 "${BEAT_HOME}/core/scroll.py" writeup weekly >> "$LOG" 2>&1; then
+    print -r -- "Done|weekly write-up finished||" > "$PROG"
+    exit 0
+  fi
+  print -r -- "Failed|weekly write-up failed; collected evidence is saved||" > "$PROG"
+  exit 1
+fi
 
 # The week folder is appended to whatever this is, so it reads as one
 # instruction. Plain words by default rather than a slash command: a command

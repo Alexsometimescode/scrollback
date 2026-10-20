@@ -36,7 +36,7 @@ with TemporaryDirectory() as tmp:
         except ValueError: pass
         else: raise AssertionError('Oversized context accepted')
         run.assert_not_called()
-print('Summary checks passed: skill reference, no tools, structured output, error and size handling')
+print('Summary checks passed: built-in guidance, no tools, structured output, error and size handling')
 
 # Preview routes only selected chats and never creates a note or collection file.
 import history_collect
@@ -85,3 +85,19 @@ with patch('history_collect.render', return_value='x' * 100000):
     bounded = history_collect.summary_context([{}] * 35, '2026-09-16', '2026-09-30')
     assert len(bounded) < 210000 and bounded.count('Evidence shortened') == 35
 print('Large selection evidence budget passed')
+
+# Provider choice must not silently route evidence to another provider.
+from summary import resolve_cli, _reporting_guidance
+with TemporaryDirectory() as tmp:
+    root = Path(tmp)
+    for name in ('codex', 'claude', 'agent'):
+        (root / name).touch()
+    with patch('summary.shutil.which', side_effect=lambda name: str(root / name)):
+        assert Path(resolve_cli({})[0]).name == 'claude'
+        for provider, executable in [('codex', 'codex'), ('claude', 'claude'), ('cursor', 'agent')]:
+            selected, _ = resolve_cli({'SUMMARY_PROVIDER': provider, 'SUMMARY_CLI': str(root/'claude')})
+            assert Path(selected).name == executable
+    with patch('summary.shutil.which', return_value=None), patch('summary.Path.is_file', return_value=False):
+        assert resolve_cli({'SUMMARY_PROVIDER':'cursor'}) == ('', 'Cursor agent (not installed)')
+assert 'completed outcomes' in _reporting_guidance()
+print('Explicit provider routing and bundled guidance checks passed')

@@ -188,6 +188,16 @@ cd ${WORKDIR} || exit 1
 : ${DAILY_COMMAND=/update_daily_auto}
 
 # The row itself is written by the EXIT trap; these branches only set the verdict.
+if [[ "${WRITEUPS_ENABLED:-false}" != legacy ]]; then
+  if python3 "${BEAT_HOME}/core/scroll.py" writeup daily "$today" >> "$LOG" 2>&1; then
+    outcome=ok
+    say "Done|${chats} chats collected||"
+    exit 0
+  fi
+  say "Failed|daily write-up failed; collected evidence is saved||"
+  exit 1
+fi
+
 if [[ -z "$DAILY_COMMAND" ]]; then
   print -r -- "collect ($TRIGGER): digest only, no write-up command set" >> "$LOG"
   outcome=ok

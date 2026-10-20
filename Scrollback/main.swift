@@ -277,8 +277,8 @@ func writeConf(_ c: [String: String]) {
     let keys = ["daily_enabled", "daily_start", "daily_end", "daily_every", "daily_minute",
                 "daily_final", "daily_weekdays_only", "weekly_enabled", "weekly_day", "weekly_time", "notify_on_failure",
                 "REPORT_MODE", "REPORT_COMMAND", "EXCLUDED", "EXCLUDED_CHATS", "DAILY_COMMAND",
-                "EXTRA_SOURCES", "CURSOR_INCLUDE_UNSCOPED", "SUMMARY_ENABLED", "SUMMARY_CLI", "SUMMARY_MODEL",
-                "HIDE_SENSITIVE"]
+                "EXTRA_SOURCES", "CURSOR_INCLUDE_UNSCOPED", "SUMMARY_ENABLED", "SUMMARY_CLI", "SUMMARY_MODEL", "SUMMARY_PROVIDER",
+                "HIDE_SENSITIVE", "WRITEUPS_ENABLED", "DAILY_PROMPT_B64", "WEEKLY_PROMPT_B64"]
     var text = "# Edited by Scrollback. Times are your Mac's local time.\n"
     for k in keys where c[k] != nil { text += "\(k)=\(shQuote(c[k]!))\n" }
     try? text.write(toFile: confPath, atomically: true, encoding: .utf8)
@@ -424,168 +424,6 @@ struct Chat: Identifiable {
             return Chat(id: String(f[0]), project: String(f[1]), title: "\(source) · \(f[2])",
                         time: String(f[3]), included: f[4] == "1")
         }
-    }
-}
-
-/// One recorded collection run, for the audit list.
-struct Run: Identifiable {
-    let id = UUID()
-    let at: Date
-    let chats: Int
-    let trigger: String
-    let ok: Bool
-    let new: Int?
-
-    static func load() -> [Run] {
-        let iso = ISO8601DateFormatter()
-        return historyLines().reversed().compactMap { line in
-            let f = line.split(separator: "|")
-            guard f.count >= 3, let d = iso.date(from: String(f[0])) else { return nil }
-            return Run(at: d, chats: Int(f[1]) ?? 0, trigger: String(f[2]),
-                       ok: f.count < 4 || f[3] == "ok",
-                       new: f.count > 4 ? Int(f[4]) : nil)
-        }
-    }
-
-    static func loadForPanel() -> [Run] {
-        DemoHistory.fillRuns(load())
-    }
-}
-
-/// Saved stand-in counts for days the digest left at zero. Today is never replaced.
-/// File lives under ~/.beatbar so a relaunch shows the same bars.
-enum DemoHistory {
-    static let preview = CommandLine.arguments.contains("--demo")
-
-    static func screenshotDays() -> [Day] {
-        let counts = [9, 15, 12, 12, 15, 10, 11]
-        return counts.enumerated().map { index, count in
-            let date = Calendar.current.date(byAdding: .day, value: index - 6, to: Date())!
-            return Day(id: "demo-\(index)", date: date, collected: count)
-        }
-    }
-
-    private static var path: String { NSHomeDirectory() + "/.beatbar/demo-history.json" }
-    private static let samples = [6, 4, 8, 5, 3, 7, 9]
-
-    static func count(for day: String) -> Int {
-        var h = 0
-        for b in day.utf8 { h = (h &* 33) &+ Int(b) }
-        let i = h % samples.count
-        return samples[i < 0 ? -i : i]
-    }
-
-    private static func read() -> [String: Int] {
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
-              let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
-        var out: [String: Int] = [:]
-        for (k, v) in raw {
-            if let n = v as? Int { out[k] = n }
-            else if let n = v as? NSNumber { out[k] = n.intValue }
-        }
-        return out
-    }
-
-    private static func write(_ days: [String: Int]) {
-        let dir = (path as NSString).deletingLastPathComponent
-        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        guard let data = try? JSONSerialization.data(withJSONObject: days, options: [.sortedKeys]) else { return }
-        try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
-    }
-
-    static func fillDays(_ real: [Day]) -> [Day] {
-        let fm = DateFormatter(); fm.dateFormat = "yyyy-MM-dd"
-        let today = fm.string(from: Date())
-        var saved = read()
-        var changed = !FileManager.default.fileExists(atPath: path)
-        for d in real where d.id != today && d.collected == 0 && saved[d.id] == nil {
-            saved[d.id] = count(for: d.id)
-            changed = true
-        }
-        if changed { write(saved) }
-        return real.map { d in
-            if d.id == today || d.collected > 0 { return d }
-            guard let n = saved[d.id] else { return d }
-            return Day(id: d.id, date: d.date, collected: n)
-        }
-    }
-
-    static func fillRuns(_ real: [Run]) -> [Run] {
-        let fm = DateFormatter(); fm.dateFormat = "yyyy-MM-dd"
-        let cal = Calendar.current
-        let have = Set(real.map { fm.string(from: $0.at) })
-        let saved = read()
-        var extra: [Run] = []
-        for offset in 1...6 {
-            guard let date = cal.date(byAdding: .day, value: -offset, to: Date()) else { continue }
-            let id = fm.string(from: date)
-            if have.contains(id) { continue }
-            let chats = saved[id] ?? count(for: id)
-            var parts = cal.dateComponents([.year, .month, .day], from: date)
-            parts.hour = 9
-            parts.minute = 7
-            guard let at = cal.date(from: parts) else { continue }
-            extra.append(Run(at: at, chats: chats, trigger: "scheduled", ok: true, new: max(1, chats / 3)))
-        }
-        return (real + extra).sorted { $0.at > $1.at }
-    }
-}
-
-struct Day: Identifiable {
-    let id: String
-    let date: Date
-    let collected: Int
-
-    static func load() -> [Day] {
-        let fm = DateFormatter(); fm.dateFormat = "yyyy-MM-dd"
-        return shell(historyScript, "7").split(separator: "\n").compactMap { line in
-            let f = line.split(separator: "|")
-            guard f.count >= 2, let d = fm.date(from: String(f[0])) else { return nil }
-            return Day(id: String(f[0]), date: d, collected: Int(f[1]) ?? 0)
-        }
-    }
-
-    /// Real digest counts win. Past days still at zero pick up the saved demo
-    /// series so the chart is not a single bar. Today is left as collected.
-    static func loadForPanel() -> [Day] {
-        if DemoHistory.preview { return DemoHistory.screenshotDays() }
-        let fromDigest = load()
-        if fromDigest.isEmpty { return seedDemo() }
-        return DemoHistory.fillDays(fromDigest)
-    }
-
-    private static func loadFromRunHistory() -> [Day]? {
-        let fm = DateFormatter(); fm.dateFormat = "yyyy-MM-dd"
-        let iso = ISO8601DateFormatter()
-        var peakByDay: [String: Int] = [:]
-        for line in historyLines() {
-            let f = line.split(separator: "|")
-            guard f.count >= 2, let d = iso.date(from: String(f[0])) else { continue }
-            let day = fm.string(from: d)
-            let chats = Int(f[1]) ?? 0
-            peakByDay[day] = max(peakByDay[day] ?? 0, chats)
-        }
-        guard !peakByDay.isEmpty else { return nil }
-        return shell(historyScript, "7").split(separator: "\n").compactMap { line in
-            let f = line.split(separator: "|")
-            guard f.count >= 2, let d = fm.date(from: String(f[0])) else { return nil }
-            let id = String(f[0])
-            let n = peakByDay[id] ?? 0
-            return Day(id: id, date: d, collected: n)
-        }
-    }
-
-    private static func seedDemo() -> [Day] {
-        let fm = DateFormatter(); fm.dateFormat = "yyyy-MM-dd"
-        let samples = [4, 3, 6, 5, 2, 4, 7]
-        var out: [Day] = []
-        for i in (0..<7).reversed() {
-            guard let d = Calendar.current.date(byAdding: .day, value: -i, to: Date()) else { continue }
-            let id = fm.string(from: d)
-            let n = samples[max(0, samples.count - 1 - i)]
-            out.append(Day(id: id, date: d, collected: n))
-        }
-        return out
     }
 }
 
@@ -1086,7 +924,7 @@ struct Panel: View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 2) {
                 switchRow("Redact locally", "HIDE_SENSITIVE", compact: true,
-                          help: "Redacts private info on your Mac before summarizing, using Desert Ant Redact offline (~12 MB Core ML, no cloud).")
+                          help: "Basic local pattern masking may miss private data. Review selected evidence before sending it to a summarizer.")
                 switchRow("Automatic collection", "daily_enabled", compact: true)
                 if store.conf["daily_enabled"] == "true" { scheduleControls }
                 HStack {
@@ -1106,18 +944,7 @@ struct Panel: View {
                 VStack(alignment: .leading, spacing: 8) {
                     switchRow("Codex and Cursor saved chats", "EXTRA_SOURCES")
                     switchRow("Include Cursor chats without a workspace folder", "CURSOR_INCLUDE_UNSCOPED")
-                    HStack {
-                        Text("Summarizer").font(.callout)
-                        Spacer()
-                        TextField("Agent default model", text: summarizerBinding)
-                            .textFieldStyle(.roundedBorder).frame(width: 145)
-                            .help("Model ID supported by the active summarizer. Leave empty for its default.")
-                    }
-                    .frame(minHeight: 44)
-                    .contentShape(Rectangle())
-                    Text("Active: \(summaryLabel)")
-                        .font(.caption2).foregroundStyle(.secondary)
-                    switchRow("AI overview in Collect preview", "SUMMARY_ENABLED")
+
                 }
                 .padding(.top, 4)
             }
@@ -1154,51 +981,82 @@ struct Panel: View {
             set: { store.conf["SUMMARY_MODEL"] = $0; apply() })
     }
 
+    private let dailyPrompt = "Summarize the selected day: completed work, decisions, blockers, and next actions. Use concise bullets grouped by project. Distinguish verified results from requests and unfinished work. Do not invent facts."
+    private let weeklyPrompt = "Summarize the selected week: key outcomes, biggest supported achievement, decisions, unresolved blockers, and next priorities. Group concise bullets by project and avoid repeating daily entries. Do not invent facts."
+
+    private func promptBinding(_ key: String, fallback: String) -> Binding<String> {
+        Binding(get: {
+            guard let encoded = store.conf[key], let data = Data(base64Encoded: encoded),
+                  let value = String(data: data, encoding: .utf8) else { return fallback }
+            return value
+        }, set: { value in
+            store.conf[key] = Data(value.utf8).base64EncodedString()
+            apply()
+        })
+    }
+
+    private func promptEditor(_ title: String, key: String, fallback: String, script: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title).font(.callout.weight(.medium))
+                Spacer()
+                Button("Reset") {
+                    store.conf[key] = Data(fallback.utf8).base64EncodedString()
+                    apply()
+                }.controlSize(.small)
+            }
+            TextEditor(text: promptBinding(key, fallback: fallback))
+                .font(.caption)
+                .frame(height: 110)
+                .padding(5)
+                .background(Color(nsColor: .textBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .accessibilityLabel("\(title) prompt")
+            Button("Run now") {
+                applyWork?.cancel()
+                writeConf(store.conf)
+                run(script)
+            }
+                .controlSize(.small)
+                .disabled(running || store.conf["WRITEUPS_ENABLED"] != "true")
+        }
+    }
+
     private var writeUpsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Button {
-                openHint = (openHint == "Write-ups") ? nil : "Write-ups"
-            } label: {
-                HStack(spacing: 4) {
-                    Text("What these do").font(.caption).foregroundStyle(.secondary)
-                    Image(systemName: openHint == "Write-ups" ? "info.circle.fill" : "info.circle")
-                        .font(.system(size: 9)).foregroundStyle(.tertiary)
-                    Spacer()
-                }
-                .contentShape(Rectangle())
-            }.buttonStyle(.plain)
-            hintText("Write-ups", "Collecting reads your chats into a digest file. These commands turn that digest into notes. Each takes a slash command, or plain words saying what to write. Both are optional.")
-
-            VStack(alignment: .leading, spacing: 3) {
-                HStack {
-                    hint("Hourly", "")
-                    Spacer()
-                    Button("Run now") { run(collectScript) }
-                        .controlSize(.small).disabled(running)
-                }
-                hintText("Hourly", "Collects your chats, then runs this to write the daily log. Leave it empty to collect only: the digest is still written.")
-                TextField("/update_daily_auto", text: Binding(
-                    get: { store.conf["DAILY_COMMAND"] ?? "" },
-                    set: { store.conf["DAILY_COMMAND"] = $0; apply() }))
-                    .textFieldStyle(.roundedBorder).font(.caption).focused($typing).onSubmit { typing = false }
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Chats are collected locally. Choose how to summarize them below.")
+                .font(.caption).foregroundStyle(.secondary)
+            Picker("Summarize with", selection: Binding(
+                get: { store.conf["SUMMARY_PROVIDER"] ?? "auto" },
+                set: { store.conf["SUMMARY_PROVIDER"] = $0; store.conf["SUMMARY_MODEL"] = ""; apply() }
+            )) {
+                Text("Automatic").tag("auto")
+                Text("Codex").tag("codex")
+                Text("Claude Code").tag("claude")
+                Text("Cursor").tag("cursor")
+                Text("Local model (Ollama)").tag("ollama")
             }
-
-            VStack(alignment: .leading, spacing: 3) {
-                HStack {
-                    hint("Friday", "")
-                    Spacer()
-                    Button("Run now") { run(makeScript) }
-                        .controlSize(.small).disabled(running)
-                }
-                hintText("Friday", "Opens a terminal in that week's folder and runs this, so you can steer it rather than watch a file appear.")
-                TextField("write this week's report from these logs", text: Binding(
-                    get: { store.conf["REPORT_COMMAND"] ?? "" },
-                    set: { store.conf["REPORT_COMMAND"] = $0; apply() }))
-                    .textFieldStyle(.roundedBorder).font(.caption).focused($typing).onSubmit { typing = false }
-                Text("→ \(weekFolderName)  ·  \(redactSensitive(weekFolderPath, hide: hideSensitive))")
-                    .font(.caption2).foregroundStyle(.secondary)
-                    .lineLimit(1).truncationMode(.middle)
+            HStack {
+                Text("Model").font(.callout)
+                Spacer()
+                TextField(store.conf["SUMMARY_PROVIDER"] == "ollama" ? "Installed model name" : "Agent default model", text: summarizerBinding)
+                    .textFieldStyle(.roundedBorder).frame(width: 145)
+                    .help(store.conf["SUMMARY_PROVIDER"] == "ollama" ? "Enter the exact name of an installed Ollama model." : "Model ID supported by the active summarizer. Leave empty for its default.")
             }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+            Text("Active: \(summaryLabel)")
+                .font(.caption2).foregroundStyle(.secondary)
+            Text("Built-in summary guidance. No skill installation needed.")
+                .font(.caption2).foregroundStyle(.secondary)
+            switchRow("AI overview in Collect preview", "SUMMARY_ENABLED")
+            switchRow("Create daily and weekly write-ups", "WRITEUPS_ENABLED")
+            Text("Prompts are built in and editable. CLI providers may send text to their service. Ollama uses an installed model on this Mac.")
+                .font(.caption2).foregroundStyle(.secondary)
+            promptEditor("Daily", key: "DAILY_PROMPT_B64", fallback: dailyPrompt, script: collectScript)
+            promptEditor("Weekly", key: "WEEKLY_PROMPT_B64", fallback: weeklyPrompt, script: makeScript)
+            Text("Write-ups are saved separately from your original notes.")
+                .font(.caption2).foregroundStyle(.secondary)
         }
     }
 
@@ -1413,8 +1271,7 @@ struct Panel: View {
             guard task.terminationStatus == 0,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let model = json["model"] as? String else { return }
-            let enabled = (json["enabled"] as? Bool) == true
-            let label = enabled ? model : "\(model) (off)"
+            let label = model
             DispatchQueue.main.async { self.summaryLabel = label }
         }
     }
@@ -1428,6 +1285,7 @@ struct Panel: View {
         let w = DispatchWorkItem {
             writeConf(store.conf)
             _ = shell(applyScript)
+            refreshSummaryLabel()
         }
         applyWork = w
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.7, execute: w)

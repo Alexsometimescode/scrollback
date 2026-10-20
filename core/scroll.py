@@ -73,7 +73,12 @@ DEFAULTS = {
     "SUMMARY_ENABLED": "true",
     "SUMMARY_CLI": "",
     "SUMMARY_MODEL": "",
+    "SUMMARY_PROVIDER": "auto",
     "SUMMARY_SKILL": "",
+    "SUMMARY_PROMPT_B64": "",
+    "WRITEUPS_ENABLED": "false",
+    "DAILY_PROMPT_B64": "",
+    "WEEKLY_PROMPT_B64": "",
 }
 
 PATH_KEYS = ("WORKDIR", "PROJECTS", "LOGDIR", "FIVE", "AGENT_CLI",
@@ -1194,6 +1199,22 @@ def collect(conf: Conf, trigger: str = "manual") -> int:
         opennow = len(chats(conf, every=False))
         say(prog, "Writing into %s.md|starting|%s||%s" % (today, chats_n, opennow))
 
+        if conf["WRITEUPS_ENABLED"] != "legacy":
+            try:
+                from writeups import run as run_writeup
+            except ImportError:
+                from .writeups import run as run_writeup
+            try:
+                output = run_writeup(conf, "daily", today)
+                append(log, "Write-up: %s" % (output or "disabled"))
+            except (ValueError, OSError) as exc:
+                append(log, "Write-up failed: %s" % exc)
+                say(prog, "Failed|daily write-up failed; collected evidence is saved||")
+                return 1
+            outcome = "ok"
+            say(prog, "Done|%s chats collected||" % chats_n)
+            return 0
+
         cmd = conf["DAILY_COMMAND"]
         # The write-up step is optional and configurable. It used to hardcode a
         # skill that exists in one person's setup, so on anyone else's machine
@@ -1346,6 +1367,18 @@ def main(argv) -> int:
         return probe(conf)
     if cmd == "agents":
         return agents(conf)
+    if cmd == "writeup":
+        try:
+            from writeups import run as run_writeup
+        except ImportError:
+            from .writeups import run as run_writeup
+        try:
+            output = run_writeup(conf, rest[0] if rest else "daily", rest[1] if len(rest) > 1 else "")
+            print(str(output) if output else "Write-ups disabled")
+            return 0
+        except (ValueError, OSError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
     if cmd == "summary-status":
         return summary_status(conf)
     if cmd == "digest":

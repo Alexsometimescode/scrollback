@@ -27,16 +27,18 @@ def check(name, cond, detail=""):
         fails.append(name)
 
 
-def run(root, *args, command="", agent="/bin/echo", extra=None):
+def run(root, *args, command="", agent="/bin/echo", extra=None, writeups="legacy"):
     conf = root / "paths.conf"
     conf.write_text("WORKDIR=%s\nPROJECTS=%s\nLOGDIR=%s\nAGENT_CLI=%s\n" % (
-        Path.home() / "Work", Path.home() / ".claude/projects",
+        root / "work", root / "projects",
         root / "logs", agent))
     (root / "home").mkdir(exist_ok=True)
-    (root / "schedule.conf").write_text("DAILY_COMMAND='%s'\n" % command)
+    (root / "work").mkdir(exist_ok=True)
+    (root / "projects").mkdir(exist_ok=True)
+    (root / "schedule.conf").write_text("DAILY_COMMAND='%s'\n" % command + ("WRITEUPS_ENABLED='%s'\n" % writeups if writeups else ""))
     env = dict(os.environ)
     env.update({"BEAT_CONF": str(conf), "BEAT_HOME": str(root),
-                "FIVE": str(root / "five"),
+                "FIVE": str(root / "five"), "EXTRA_SOURCES": "false",
                 "HIST": str(root / "five/.beats/history.log")})
     env.update(extra or {})
     return subprocess.run([sys.executable, str(SCROLL)] + list(args),
@@ -83,6 +85,12 @@ def main():
               len(rs) == 1 and rs[0].split("|")[3] == "fail", str(rs))
         check("lock released after failure",
               not (root / "logs/collect.lock").exists())
+
+    # No enable key must never invoke a configured legacy write-up command.
+    with tempfile.TemporaryDirectory() as t:
+        root = Path(t)
+        r = run(root, "collect", "manual", command="x", agent="/usr/bin/false", writeups="")
+        check("unset write-ups skips legacy command", r.returncode == 0, r.stderr[-200:])
 
     # 3. a second run must not start on top of a live one, and must not write a
     #    row for work it did not do

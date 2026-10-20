@@ -1,10 +1,10 @@
-# CLAUDE.md — Scrollback
+# CLAUDE.md: Scrollback
 
 ## What this is
 
 A menu bar app that shows how much of your AI chat work is actually being
-captured into the daily logs. Swift, no Xcode project, no dependencies. Shipped
-privately at `github.groupondev.com/Alexsometimescode/scrollback`.
+captured into the daily logs. Swift, no Xcode project. Public source:
+`https://github.com/Alexsometimescode/scrollback`. The collector uses Python 3.
 
 ## The rule that matters most
 
@@ -76,7 +76,9 @@ Do not undo these:
 
 ## Working on it
 
-- Invoke the `ponytail` skill, per the global rule.
+- Follow the configured Matt Pocock workflow. Tracker conventions are in
+  `docs/agents/issue-tracker.md`; domain contracts are in
+  `docs/agents/domain.md`.
 - Rebuild with `Scrollback/build.sh`; it stamps `VERSION` into the bundle and copies
   the scripts into `Contents/Resources/scripts`.
 - Screenshots for the README are captured from the real app:

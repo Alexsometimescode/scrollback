@@ -10,7 +10,7 @@ mkdir -p "${APP}/Contents/MacOS"
 
 VER=$(cat "${HERE}/../VERSION" 2>/dev/null || print 1.0.0)
 
-swiftc -O "${HERE}/main.swift" "${HERE}/Collection.swift" "${HERE}/CalendarDates.swift" -o "${APP}/Contents/MacOS/Scrollback"
+swiftc -O "${HERE}/main.swift" "${HERE}/Collection.swift" "${HERE}/CalendarDates.swift" "${HERE}/History.swift" -o "${APP}/Contents/MacOS/Scrollback"
 
 mkdir -p "${APP}/Contents/Resources"
 cp "${HERE}/Scrollback.icns" "${APP}/Contents/Resources/" 2>/dev/null || true

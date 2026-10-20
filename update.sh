@@ -1,19 +1,16 @@
 #!/usr/bin/env zsh
-# Updates the app, preferring GitHub Releases and falling back to a git pull.
-#
-# Releases are the path that works for everyone: a zip install has no remote to
-# pull from, and comparing published versions is clearer than comparing commits.
-# The repo is private, so the download needs the gh CLI's credentials; without
-# gh it falls back to pulling a checkout.
+# Updates packaged apps from public GitHub releases. Source checkouts require
+# an explicit update and local rebuild so scripts and the binary stay together.
 #
 # Writes "phase|detail||" to the progress file like the other actions.
 set -uo pipefail
-source "${0:A:h}/paths.sh"
 # Local previews must never contact the retired release server.
 [[ "${BEATBAR_LOCAL_ONLY:-}" == "1" || "${LOCAL_ONLY:-}" == true ]] && exit 0
+source "${0:A:h}/paths.sh"
 
-REPO="Alexsometimescode/scrollback"
-export GH_HOST="${GH_HOST:-github.groupondev.com}"
+REPO="https://github.com/Alexsometimescode/scrollback"
+PUBLIC_GIT="https://github.com/Alexsometimescode/scrollback.git"
+export GH_HOST="github.com"
 
 say() { print -r -- "$1" > "$PROG"; }
 
@@ -38,6 +35,13 @@ fi
 [[ -d "$app" ]] || { say "Cannot find the app|nothing to update||"; exit 2; }
 
 here=$(defaults read "$app/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || print 0.0.0)
+
+valid_version() { [[ "$1" == <->.<->.<-> ]]; }
+newer_release() {
+  valid_version "$1" && valid_version "$here" || return 1
+  autoload -Uz is-at-least
+  ! is-at-least "$1" "$here"
+}
 
 restart() { ( sleep 1; pkill -x Scrollback; sleep 1; open "$app" ) >/dev/null 2>&1 & }
 
@@ -66,60 +70,87 @@ if [[ "${1:-}" == "--summary" ]]; then
   exit 0
 fi
 
-if [[ "${1:-}" == "--check" ]]; then
-  print -r -- "CURRENT|${here}"
-  d="$BEAT_HOME"
-  for _ in 1 2 3 4; do
-    if [[ -d "$d/.git" ]]; then
-      u=$(git -C "$d" remote get-url origin 2>/dev/null)
-      if [[ "$u" == *scrollback* ]]; then
-        # A checkout: newer means the remote has commits we do not.
-        git -C "$d" fetch -q origin 2>/dev/null
-        b=$(git -C "$d" rev-parse HEAD 2>/dev/null)
-        r=$(git -C "$d" rev-parse '@{u}' 2>/dev/null)
-        [[ -n "$r" && "$b" != "$r" ]] && print -r -- "LATEST|$(git -C "$d" show '@{u}:VERSION' 2>/dev/null | tr -d '[:space:]')"
-        exit 0
-      fi
-    fi
-    d="${d:h}"
-  done
-  if command -v gh >/dev/null 2>&1; then
-    l=$(gh release view --repo "$REPO" --json tagName -q .tagName 2>/dev/null | sed 's/^v//')
-    [[ -n "$l" && "$l" != "$here" ]] && print -r -- "LATEST|${l}"
-  fi
-  exit 0
-fi
-
-# --- a git checkout updates itself, and must do so BEFORE the release path.
-# Every judgement in this tool lives in a shell script, and the app prefers the
-# checkout's scripts over the copy bundled in the .app. Downloading the release
-# replaces only the .app, so a cloned install used to end up running a new binary
-# against the old scripts: the half that decides anything never moved.
+# A checkout may only use the public project. Reject other remotes locally,
+# before any fetch, pull or release lookup. Worktrees use a .git file.
 inrepo=""
 d="$BEAT_HOME"
 for _ in 1 2 3 4; do
-  if [[ -d "$d/.git" ]]; then
+  if [[ -e "$d/.git" ]]; then
     u=$(git -C "$d" remote get-url origin 2>/dev/null)
-    [[ "$u" == *scrollback* ]] && { inrepo="$d"; break; }
+    case "$u" in
+      https://github.com/Alexsometimescode/scrollback|https://github.com/Alexsometimescode/scrollback.git|git@github.com:Alexsometimescode/scrollback.git)
+        inrepo="$d"; break ;;
+      *) say "Update unavailable|checkout must use the public Scrollback repository||"; exit 2 ;;
+    esac
   fi
   d="${d:h}"
 done
 
+if [[ "${1:-}" == "--check" ]]; then
+  print -r -- "CURRENT|${here}"
+  if [[ -n "$inrepo" ]]; then
+    # Only a successful public-main fetch can establish a remote update.
+    git -C "$inrepo" fetch -q "$PUBLIC_GIT" main 2>/dev/null || exit 1
+    b=$(git -C "$inrepo" rev-parse HEAD 2>/dev/null)
+    r=$(git -C "$inrepo" rev-parse FETCH_HEAD 2>/dev/null)
+    if [[ -n "$b" && -n "$r" && "$b" != "$r" ]] &&
+       git -C "$inrepo" merge-base --is-ancestor HEAD FETCH_HEAD 2>/dev/null; then
+      l=$(git -C "$inrepo" show FETCH_HEAD:VERSION 2>/dev/null | tr -d '[:space:]')
+      valid_version "$l" && print -r -- "LATEST|${l}"
+    fi
+    exit 0
+  fi
+  if command -v gh >/dev/null 2>&1; then
+    release_tag=$(gh release view --repo "$REPO" --json tagName -q .tagName 2>/dev/null) || exit 1
+    l="${release_tag#v}"
+    newer_release "$l" && print -r -- "LATEST|${l}"
+  fi
+  exit 0
+fi
+
+# Pulling source alone cannot update the compiled Swift app. Leave checkouts
+# unchanged and report the required build instead of claiming a binary update.
+if [[ -n "$inrepo" ]]; then
+  say "Source build required|update the public checkout and rebuild with Scrollback/build.sh||"
+  exit 2
+fi
 # --- preferred: the latest published release
 if [[ -z "$inrepo" ]] && command -v gh >/dev/null 2>&1; then
   say "Checking for updates|installed v${here}||"
-  latest=$(gh release view --repo "$REPO" --json tagName -q .tagName 2>/dev/null | sed 's/^v//')
-  if [[ -n "$latest" ]]; then
-    if [[ "$latest" == "$here" ]]; then
-      say "Up to date|v${here} is the latest||"
+  latest_tag=$(gh release view --repo "$REPO" --json tagName -q .tagName 2>/dev/null) || {
+    say "Update unavailable|public release lookup failed; installed app unchanged||"
+    exit 1
+  }
+  latest="${latest_tag#v}"
+  if valid_version "$latest"; then
+    if ! newer_release "$latest"; then
+      say "No newer release|installed v${here}||"
       exit 0
     fi
     say "Downloading|v${here} to v${latest}||"
     tmp=$(mktemp -d) || exit 1
-    if gh release download --repo "$REPO" --pattern 'Scrollback.app.zip' --dir "$tmp" --clobber 2>/dev/null; then
+    if gh release download "$latest_tag" --repo "$REPO" --pattern 'Scrollback.app.zip' --dir "$tmp" --clobber 2>/dev/null; then
       ditto -x -k "$tmp/Scrollback.app.zip" "$tmp" && [[ -d "$tmp/Scrollback.app" ]] || {
         say "Update failed|the download could not be unpacked||"; rm -rf "$tmp"; exit 1; }
-      rm -rf "$app" && cp -R "$tmp/Scrollback.app" "$app"
+      # Stage on the app's filesystem. Copy failure must leave the old app intact.
+      stage=$(mktemp -d "${app:h}/.scrollback-update.XXXXXX") || {
+        say "Update failed|cannot stage the new app||"; rm -rf "$tmp"; exit 1; }
+      if ! cp -R "$tmp/Scrollback.app" "$stage/Scrollback.app"; then
+        say "Update failed|could not copy the new app; installed app unchanged||"
+        rm -rf "$tmp" "$stage"; exit 1
+      fi
+      if ! mv "$app" "$stage/previous.app"; then
+        say "Update failed|could not replace the installed app||"
+        rm -rf "$tmp" "$stage"; exit 1
+      fi
+      if ! mv "$stage/Scrollback.app" "$app"; then
+        mv "$stage/previous.app" "$app" 2>/dev/null || {
+          say "Update failed|old app preserved at ${stage}/previous.app||"
+          rm -rf "$tmp"; exit 1; }
+        say "Update failed|previous app restored||"
+        rm -rf "$tmp" "$stage"; exit 1
+      fi
+      rm -rf "$stage"
       rm -rf "$tmp"
       say "Restarting|now on v${latest}||"
       restart
@@ -129,18 +160,5 @@ if [[ -z "$inrepo" ]] && command -v gh >/dev/null 2>&1; then
   fi
 fi
 
-# --- a checkout: pull it, which moves the scripts and the prebuilt app together
-root="$inrepo"
-[[ -z "$root" ]] && { say "No update source|install gh, or clone the repo||"; exit 2; }
-
-say "Checking for updates|${root:t}||"
-before=$(git -C "$root" rev-parse --short HEAD 2>/dev/null)
-git -C "$root" pull --ff-only -q 2>/dev/null || {
-  say "Could not update|pull failed, check the network or local changes||"; exit 1; }
-after=$(git -C "$root" rev-parse --short HEAD 2>/dev/null)
-[[ "$before" == "$after" ]] && { say "Up to date|v${here}||"; exit 0; }
-
-[[ -f "$root/Scrollback.app.zip" ]] && ditto -x -k "$root/Scrollback.app.zip" "$root"
-say "Restarting|updated||"
-restart
-exit 0
+say "Update unavailable|no public release could be installed; source builds require a local rebuild||"
+exit 2

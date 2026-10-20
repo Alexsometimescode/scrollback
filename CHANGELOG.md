@@ -7,6 +7,17 @@ was measured rather than estimated.
 
 ---
 
+## 1.8.1 (2026-10-20)
+
+### Fixed
+- Ordinary history preserves recorded zero counts and failed runs. Empty history stays empty, and old demo caches cannot fill it with invented results.
+- Sample history is limited to explicit --demo mode; sample runs are labelled demo.
+- Update checks use the public Scrollback repository, reject archived or unrelated origins, and do not offer updates because a local checkout is ahead.
+- Source checkouts report the required local rebuild instead of claiming an unchanged binary was updated. Packaged updates preserve the old app when copying the replacement fails.
+
+### Added
+- Regression tests compile the actual Swift history loaders with synthetic CLI records and exercise the updater through fake command adapters.
+
 ## 1.8.0 — 2026-08-18
 
 ### Added

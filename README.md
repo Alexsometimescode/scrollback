@@ -1,103 +1,115 @@
 # Scrollback
 
-<p align="center">
-  <img src="docs/panel.png" width="360" alt="Scrollback menu bar panel: chat count, health, and Collect chats">
-</p>
+Recover useful context from saved AI chats, then turn selected conversations into a Markdown note.
 
-<p align="center">
-  <strong>macOS menu bar app for Cursor chat recovery.</strong><br>
-  See which agent sessions had real input today, collect them into a daily digest, and catch gaps before work disappears into closed tabs.
-</p>
+Scrollback is a macOS menu bar app for saved **Claude Code, Codex and Cursor** conversations. It reads local chat records, lets you choose the evidence to collect, and previews a draft before you save it. Optional AI summaries and scheduled daily or weekly write-ups sit on top of that local collection workflow.
 
-Built for the [Cursor hackathon](https://cursor.com). This repository is the **Swift menubar app and collector scripts only**; a separate marketing site is kept out of git on purpose.
+Built at the [Cursor hackathon](https://cursor.com). MIT licensed.
 
----
+## What you can do
 
-## What it is
+- Browse saved conversations by date, agent and project, using saved titles where available.
+- Select individual chats and preview their messages and recorded activity.
+- Read a local evidence draft, or request an optional AI overview with Summary and Categories views.
+- Copy or edit the current draft, save it as a new Markdown file, or append it to an existing note.
+- Collect a daily digest on a configurable schedule and inspect recorded collection runs.
+- Enable daily or weekly write-ups with editable prompts and a selected summary provider.
 
-Scrollback watches Cursor transcript stores on disk (read-only). It does not send chat content to a cloud service. A small AppKit app in the menu bar shows collection health; shell scripts decide what counts as a chat and write the digest. The app parses fixed stdout lines (`SESSIONS|N`, progress phases, history rows) and renders them.
+Saving a preview is explicit. **Save new** will not overwrite an existing file. **Append** preserves the note and avoids adding an identical draft again. Scheduled collection and enabled write-ups are separate actions that can write their configured outputs automatically.
 
-If the panel, the digest file, and `chats_list.sh` disagree on a number, that is a bug. The project keeps one definition of “a chat” everywhere (see `CLAUDE.md`).
+## Supported conversation sources
 
-## Features
+| Source | What Scrollback reads |
+|---|---|
+| Claude Code | Saved local conversation records with human input and activity timestamps. |
+| Codex | Saved local session records, with optional local title/project metadata. |
+| Cursor | Saved transcripts and supported local database records, opened read-only. |
 
-- **Menu bar snapshot** of today’s typed-in Cursor sessions and collection health
-- **Collect now** or **Collect chats…** for a date range, with per-chat selection
-- **Daily markdown digest** on a schedule you control (hourly collection, optional write-up commands)
-- **Sources panel** to include or exclude project folders without editing config by hand
-- **Chats window** to audit what the collector sees for the current day
-- **Script-first design**: judgements live in `*.sh` and `core/scroll.py`; the app is a thin UI
-- **No Xcode project**: `swiftc` build via `Scrollback/build.sh`, no third-party dependencies
-- **Privacy (on-device)**: optional scrub before any LLM summarize handoff, designed around **[Desert Ant Labs Redact](https://desertant.com/models/redact/)**, a ~12 MB Core ML model that runs **fully offline on your Mac** (no redaction traffic to the cloud)
+A conversation must exist in a supported local format. Scrollback cannot recover unsaved messages or guarantee compatibility with future changes to another application's storage. Date selection depends on timestamps in those records. The Grok hook is a placeholder and currently returns no conversations.
 
-## Privacy and redaction (offline)
+## Collection and optional AI
 
-Scrollback keeps raw chats on disk under your control. When you turn on **Redact locally** in the panel, text is masked **on your device** before it is passed to Cursor, Claude Code, Codex, or another summarizer.
+Collection reads local source records. AI overview is a separate choice: selected chat evidence is passed through an installed provider CLI when overview is enabled.
 
-We integrate **[Desert Ant Redact](https://desertant.com/models/redact/)** ([Desert Ant Labs](https://desertant.com)) for PII-style spans (names, emails, cards, IDs, and similar) in many languages. Redact is a small on-device model (~12 MB on Apple Silicon via Core ML); inference stays local. API keys and repo paths may still be stripped with additional local rules. Nothing in this step requires sending your chat to Desert Ant's servers.
+| Summary choice | Processing |
+|---|---|
+| AI overview off | Local evidence excerpts and a checklist draft, without an AI-provider request. |
+| Claude Code, Codex or Cursor CLI | Selected evidence is passed to that CLI. Its account, remote processing and usage charges apply. |
+| Local model through Ollama | Requires Ollama and an exact model already installed locally. The adapter requires a loopback endpoint and rejects model metadata identifying a remote model. |
 
-SDK: [redact-swift](https://github.com/Desert-Ant-Labs/redact-swift) · [model card](https://huggingface.co/desert-ant-labs/redact)
+Choose the provider in **Write-ups**. With `auto`, an explicit configured CLI takes priority; otherwise provider discovery tries Claude Code, Cursor and Codex in that order. The checked-in configuration currently enables AI overview with a Codex CLI path. Turn off **AI overview in Collect preview** before selecting private conversations if you want local-only previews.
 
-## Requirements
+In Collect preview, a missing or failed summarizer falls back to a labelled local evidence draft. It is not presented as a completed AI summary. Scheduled write-ups report synthesis failure without replacing an existing output. Scrollback does not install provider CLIs, sign in for you, install Ollama or download models. Live provider behavior has not been fully verified in this release.
 
-- macOS 13 (Ventura) or later
-- Xcode Command Line Tools (`swiftc`)
-- Cursor installed locally if you want real transcripts to collect
+## Privacy and saved notes
 
-## Install and build
+Source chat stores are read-only inputs. Generated notes, digests, history, settings and schedules are separate local outputs. Settings are shared by the app and its collector scripts; configured source folders and exclusions determine what the daily collector sees.
 
-```bash
+Current masking uses local text patterns for token-like strings and some displayed paths. It is limited, not a complete PII detector or a guarantee that selected text is safe to send. Review the evidence before enabling a remote summarizer. No verified Core ML redaction integration is claimed.
+
+Daily and weekly write-ups use separate app-owned files, leaving original daily context notes intact. Those generated write-up files may be replaced on a later run for the same period. Review any legacy custom write-up commands before enabling them.
+
+Machine-specific paths belong in `paths.conf`, which Git ignores. Do not commit chat records, notes, tokens or screenshots containing private project names.
+
+## Build and run on macOS
+
+Requirements:
+
+- macOS and Xcode Command Line Tools, including `swiftc`.
+- Python 3 for the collector, plus the system `zsh`.
+- Saved local records from at least one supported conversation source.
+- For optional AI summaries, an installed provider CLI or an installed local Ollama model.
+
+```sh
 git clone https://github.com/Alexsometimescode/scrollback.git
 cd scrollback
 ./Scrollback/build.sh
 open Scrollback/Scrollback.app
 ```
 
-The build script compiles the app, stamps `VERSION` into the bundle, and copies the collector scripts into `Scrollback/Scrollback.app/Contents/Resources/scripts/` so the `.app` can live in `/Applications` on its own.
+The build script compiles the Swift app, stamps the version from `VERSION`, bundles the shell/Python collector and signs the local build with the available local identity or an ad-hoc signature. Python remains a runtime requirement. This is a source build, not a notarized download. The bundle declares macOS 13 as its minimum; compatibility with older macOS releases has not been independently verified.
 
-Optional: double-click `install.command` in the repo root to copy the built app to `/Applications/Scrollback.app`.
+## First use
 
-## Usage (quick demo)
+1. Open Scrollback from the menu bar and complete **Set up Scrollback** with your source folders and output locations.
+2. Review source exclusions, automatic collection, AI overview and write-up settings before collecting.
+3. Choose **Collect chats**, select a date range and the conversations you want, then preview the selected evidence.
+4. Review the draft. Use **Save new** or **Append** and choose the Markdown destination in the file picker.
+5. Inspect the saved note. For automatic digests, use the panel's collection status and recorded run history to check what happened.
 
-1. **Launch** `Scrollback/Scrollback.app` after building. Scrollback appears as a menu bar icon (no Dock tile).
-2. **First run**: open the panel and complete **Set up Scrollback** (work folders, log locations, schedule). Write-up commands are optional; collection works without them.
-3. **Check status**: the headline shows how many chats count for today; open **Settings** to tune sources and times.
-4. **Collect**: use **Collect now** in the panel, or **Collect chats…** to pick a date range, then **Collect selected** or **Collect all** in the chats window.
-5. **Verify from the terminal** (same rules as the UI):
+The manual selection workflow and scheduled daily digest have different source-scope options, including unassigned Cursor chats. Compare counts only for the same dates and inclusion rules.
 
-   ```bash
-   ./scroll_status.sh | head -1
-   BEAT_ALL=1 ./chats_list.sh | wc -l
-   ```
+## History and updates
 
-   The chat count should match what the digest reports for that day.
+Version 1.8.1 removes sample history from normal operation. Empty history stays empty, zero counts stay zero, and failed runs stay failed. Sample history requires an explicit `--demo` launch and sample runs are labelled `demo`; a demo is not proof that collection occurred.
 
-More UI screenshots live under [`docs/`](docs/) (`settings.png`, `sources.png`, `chats.png`, `runs.png`).
+Updates use the public Scrollback repository on github.com. A packaged install can check for a published release. Source checkouts report that a source update and local rebuild are required; pulling scripts alone does not update a compiled app. Keep local changes before updating a checkout.
 
-## Repository layout
+## Verification and limits
 
-| Path | Role |
-|------|------|
-| `Scrollback/` | Swift AppKit sources and `build.sh` |
-| `core/` | Python collector (parity with zsh, tests, future Windows helpers) |
-| `*.sh`, `schedule.conf` | Digest, chat list, schedule, and status scripts the app invokes |
-| `docs/` | Design notes and README screenshots |
-| `CLAUDE.md` | Contributor rules: chat definition, stdout contracts, parity gates |
+The current repair passed synthetic source/selection/note tests, shell/Python collector parity, failure and run-lock checks, the actual Swift history-loader regression, and updater CLI fixtures. The native app compiled, and an isolated panel showed seven zero days with empty sources. The updater suite includes failed lookups, failed copies and a successful replacement using fake external commands.
 
-Machine-local paths go in `paths.conf` (gitignored, created at setup).
+```sh
+python3 -B core/integration_test.py
+python3 -B core/test_note_store.py
+python3 -B core/test_summary.py
+python3 -B core/test_panel_history.py
+python3 -B core/test_update.py
+python3 -B -m unittest core.test_writeups
+```
 
-## For hackathon reviewers
+These checks do not establish a complete live-provider, downloaded-update or user-chat workflow. Windows helpers are experimental; the desktop app described here is for macOS. Use labelled synthetic conversations for public demos. Older development screenshots are excluded from the source tree.
 
-| Question | Where to look |
-|----------|----------------|
-| What gets collected? | `docs/history-collection.md`, `docs/codex-cursor-support.md` |
-| How is a chat defined? | `chats_list.sh`, `CLAUDE.md` |
-| Does the app implement business logic? | Mostly no: start with `collect_now.sh`, `digest.sh`, `scroll_status.sh` |
-| Python vs zsh | `core/parity.sh` and `core/selftest.py` |
-| Secrets in repo? | No tokens; `paths.conf` and logs stay local |
+## Source layout
 
-This repo intentionally excludes marketing HTML, Cloudflare config, and prebuilt release zips. Build from source with `./Scrollback/build.sh`.
+| Path | Purpose |
+|---|---|
+| `Scrollback/` | Swift menu bar app, collection UI and history loaders. |
+| `core/` | Python parsers, selection, summaries, note saving, write-ups and tests. |
+| Root shell scripts | Daily collection, scheduling, status and updates. |
+| `docs/` | Collector contracts and verification notes. |
+| `CLAUDE.md` | Contributor conventions and collection contracts. |
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+[MIT](LICENSE).
